@@ -27,9 +27,7 @@ const DEFAULT_RECORDER_CONFIG = {
 // Required for desktopCapturer + getUserMedia in renderer
 app.commandLine.appendSwitch("enable-usermedia-screen-capturing");
 app.commandLine.appendSwitch("allow-http-screen-capture");
-// Disable hardware sandboxing so getUserMedia works reliably on Windows
-app.commandLine.appendSwitch("no-sandbox");
-// Prefer hardware-accelerated video encoding when available
+// GPU acceleration hints (safe — do not touch sandbox flags here)
 app.commandLine.appendSwitch("enable-accelerated-video-decode");
 app.commandLine.appendSwitch("enable-gpu-rasterization");
 
