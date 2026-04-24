@@ -20,12 +20,13 @@ extraResources: []
 # ── Windows ───────────────────────────────────────────────────────────────────
 win:
   target:
-    - target: nsis
-      arch:
-        - x64
     - target: portable
       arch:
         - x64
+  # Skip embedding icon/version-info into the exe via winCodeSign.
+  # winCodeSign requires symlink creation which needs Developer Mode or Admin.
+  # Without this flag, builds fail on standard Windows user accounts.
+  signAndEditExecutable: false
   # Unsigned build — Windows SmartScreen will warn on first run.
   # To add code signing: set certificateFile + certificatePassword below.
   # certificateFile: "cert.pfx"
