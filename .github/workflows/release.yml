@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # Triggers on tags like v1.0.0, v1.2.3, etc.
+
+permissions:
+  contents: write   # Required to create GitHub Releases and upload assets
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # 3. Enable symlinks (required by electron-builder winCodeSign on Windows)
+      - name: Enable Git symlinks
+        run: git config --global core.symlinks true
+
+      # 4. Enable Windows Developer Mode (needed for symlink creation)
+      - name: Enable Developer Mode
+        shell: powershell
+        run: |
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" `
+            /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      # 5. Install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # 6. Build Next.js static export + package as .exe
+      #    GH_TOKEN is automatically provided by GitHub Actions
+      - name: Build & Publish .exe to GitHub Releases
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_TARGET: electron
+          CSC_IDENTITY_AUTO_DISCOVERY: false

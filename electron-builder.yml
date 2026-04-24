@@ -1,0 +1,49 @@
+# RecordApp — Electron Builder Config
+
+appId: "com.screenstudio.recordapp"
+productName: "ScreenStudio"
+copyright: "Copyright © 2026 ThreePPP"
+
+# Source: Next.js static export lives in ./out/
+directories:
+  output: dist
+  buildResources: electron/assets
+
+# Files to include in the package
+files:
+  - "out/**/*"
+  - "electron/**/*.cjs"
+  - "package.json"
+
+extraResources: []
+
+# ── Windows ───────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  # Unsigned build — Windows SmartScreen will warn on first run.
+  # To add code signing: set certificateFile + certificatePassword below.
+  # certificateFile: "cert.pfx"
+  # certificatePassword: ""
+
+# ── NSIS installer ────────────────────────────────────────────────────────────
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: "ScreenStudio"
+  uninstallDisplayName: "ScreenStudio"
+  deleteAppDataOnUninstall: false
+
+# ── Auto-update via GitHub Releases ───────────────────────────────────────────
+publish:
+  provider: github
+  owner: "ThreePPP"
+  repo: "Recordaapp"
+  releaseType: release

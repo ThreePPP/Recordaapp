@@ -1,13 +1,32 @@
 {
   "name": "recordapp",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "description": "ScreenStudio — desktop screen recorder built with Electron + Next.js",
   "private": true,
+  "main": "electron/main.cjs",
+  "homepage": "https://github.com/ThreePPP/Recordaapp",
+  "author": {
+    "name": "ThreePPP"
+  },
   "scripts": {
-    "dev": "next dev",
+    "dev": "npm run dev:desktop",
+    "dev:web": "next dev",
+    "dev:electron": "wait-on tcp:3000 && electron .",
+    "dev:desktop": "concurrently -k \"npm:dev:web\" \"npm:dev:electron\"",
+    "typecheck": "tsc --noEmit",
     "build": "next build",
-    "start": "next start"
+    "build:exe": "cross-env BUILD_TARGET=electron next build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --publish never",
+    "build:portable": "cross-env BUILD_TARGET=electron next build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win portable --publish never",
+    "release": "cross-env BUILD_TARGET=electron next build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --publish always",
+    "start": "npm run start:desktop",
+    "start:web": "next start",
+    "start:electron": "wait-on tcp:3000 && electron .",
+    "start:desktop": "concurrently -k \"npm:start:web\" \"npm:start:electron\"",
+    "electron": "electron ."
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
+    "fix-webm-duration": "^1.0.6",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -18,7 +37,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^36.3.2",
+    "electron-builder": "^25.1.8",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^8.0.3"
   }
 }
