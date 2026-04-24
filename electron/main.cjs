@@ -252,7 +252,40 @@ function createMainWindow() {
     return { action: "deny" };
   });
 
+  // ── Fix Next.js routing in file:// (packaged mode) ──────────────────────────
+  // Next.js <Link> navigates to "/" or "/settings" — but in file:// protocol
+  // these paths don't resolve. Intercept and redirect to the correct HTML file.
+  if (!isDev) {
+    const outDir = path.join(__dirname, "..", "out");
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      // Only intercept internal file:// navigations
+      if (!url.startsWith("file://")) return;
+      try {
+        const parsed = new URL(url);
+        const pathname = parsed.pathname;
+        // Normalize: strip trailing slash, lowercase
+        const clean = pathname.replace(/\/+$/, "").replace(/\/index\.html$/, "") || "/";
+        let target;
+        if (clean === "" || clean === "/" || clean.endsWith("/index.html")) {
+          target = path.join(outDir, "index.html");
+        } else {
+          // e.g. /settings → out/settings/index.html
+          const seg = clean.replace(/^\//, "");
+          target = path.join(outDir, seg, "index.html");
+        }
+        const fileUrl = `file://${target.replace(/\\/g, "/")}`;
+        if (fileUrl !== url) {
+          event.preventDefault();
+          mainWindow.loadURL(fileUrl);
+        }
+      } catch {
+        // ignore malformed URLs
+      }
+    });
+  }
+
   mainWindow.loadURL(getStartUrl());
+
 
   // DevTools: only open in dev mode via Ctrl+Shift+I shortcut, NOT auto-opened
   // (removes the red-X issue from the screenshot)
