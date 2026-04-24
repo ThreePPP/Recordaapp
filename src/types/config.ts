@@ -45,6 +45,8 @@ export type RecorderConfig = {
   includeMicrophone: boolean;
   videoBitrateKbps: number;
   maxRecordingMinutes: number;
+  /** Folder path where recordings are saved. Empty string = not configured. */
+  savePath: string;
 };
 
 export const DEFAULT_RECORDER_CONFIG: RecorderConfig = {
@@ -53,6 +55,7 @@ export const DEFAULT_RECORDER_CONFIG: RecorderConfig = {
   includeMicrophone: false,
   videoBitrateKbps: DEFAULT_VIDEO_BITRATE_KBPS,
   maxRecordingMinutes: DEFAULT_MAX_RECORDING_MINUTES,
+  savePath: "",
 };
 
 function normalizeBitrateKbps(value: unknown): number {
@@ -84,5 +87,6 @@ export function normalizeRecorderConfig(value: Partial<RecorderConfig> | null | 
     includeMicrophone: value?.includeMicrophone === true,
     videoBitrateKbps: normalizeBitrateKbps(value?.videoBitrateKbps),
     maxRecordingMinutes: normalizeMaxRecordingMinutes(value?.maxRecordingMinutes),
+    savePath: typeof value?.savePath === "string" ? value.savePath : "",
   };
 }

@@ -335,16 +335,32 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
   // ── Recording: save file ───────────────────────────────────────────────────
 
-  const saveRecording = useCallback((chunks: Blob[], format: RecordFormat, durationMs: number) => {
+  const saveRecording = useCallback(async (chunks: Blob[], format: RecordFormat, durationMs: number) => {
     const raw = new Blob(chunks, {
       type: format.mimeType || (format.ext === "mp4" ? "video/mp4" : "video/webm"),
     });
 
-    const doSave = (blob: Blob) => {
+    const filename = `record-${new Date().toISOString().replace(/[:.]/g, "-")}.${format.ext}`;
+    const folderPath = config.savePath;
+
+    const doSave = async (blob: Blob) => {
+      // ── Electron: write to disk via IPC ──────────────────────────────────
+      if (window.electronAPI?.saveRecording && folderPath) {
+        try {
+          const buffer = await blob.arrayBuffer();
+          const saved = await window.electronAPI.saveRecording(buffer, filename, folderPath);
+          setStatus(`${filename} saved`);
+          console.info("[recorder] saved →", saved);
+          return;
+        } catch (err) {
+          console.error("[recorder] IPC save failed, falling back to download", err);
+        }
+      }
+      // ── Browser fallback: trigger download ───────────────────────────────
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `record-${new Date().toISOString().replace(/[:.]/g, "-")}.${format.ext}`;
+      a.download = filename;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     };
@@ -352,14 +368,30 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     // Fix duration so the seek bar works, then save
     fixBlobDuration(raw, durationMs)
       .then(doSave)
-      .catch(() => doSave(raw)); // fallback: save without fix
-  }, []);
+      .catch(() => void doSave(raw)); // fallback: save without fix
+  }, [config.savePath]);
+
 
   // ── Recording: start ───────────────────────────────────────────────────────
 
   const startRecording = useCallback(async () => {
     if (!configReady) { setStatus("Loading settings…"); return; }
     if (isRecording) return;
+
+    // ── Ensure a save folder is configured before starting ────────────────
+    if (window.electronAPI?.selectSavePath && !config.savePath) {
+      setStatus("Please select a save folder…");
+      const chosen = await window.electronAPI.selectSavePath();
+      if (!chosen) {
+        setStatus("Recording cancelled — no save folder selected.");
+        return;
+      }
+      // Persist the chosen path to config
+      await window.electronAPI.saveAppConfig({ ...config, savePath: chosen });
+      // Note: config will update on next render via useAppConfig polling;
+      // we store it in a local ref so saveRecording can use it immediately.
+      (config as { savePath: string }).savePath = chosen;
+    }
 
     if (!sourceStreamRef.current) {
       if (!await startSharing()) return;

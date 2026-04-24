@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveAppConfig: (config) => ipcRenderer.invoke("config:save", config),
   getAppConfigPath: () => ipcRenderer.invoke("config:path"),
 
+  // ── Save path ────────────────────────────────────────────────────────────
+  // Opens native folder picker → returns path string or null if cancelled
+  selectSavePath: () => ipcRenderer.invoke("dialog:selectSavePath"),
+  // Writes recording blob to disk at the configured path
+  saveRecording: (buffer, filename, folderPath) =>
+    ipcRenderer.invoke("file:saveRecording", { buffer, filename, folderPath }),
+
   // ── App info ─────────────────────────────────────────────────────────────
   // Synchronous-style wrapper — resolves immediately since main returns a value
   getAppVersion: () => ipcRenderer.invoke("app:version"),

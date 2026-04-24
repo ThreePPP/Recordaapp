@@ -335,10 +335,38 @@ ipcMain.handle("config:save", (_event, payload) =>
 );
 ipcMain.handle("config:path", () => getConfigFilePath());
 
+// ── IPC: Save path picker ──────────────────────────────────────────────────────
+
+// Opens a native folder-picker dialog and returns the selected path (or null).
+ipcMain.handle("dialog:selectSavePath", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "Select Recording Save Folder",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+// ── IPC: Write recording to disk ───────────────────────────────────────────────
+
+// Receives a Uint8Array buffer + filename + folder path from the renderer,
+// writes the file, and returns the full file path on success.
+ipcMain.handle("file:saveRecording", async (_event, payload) => {
+  const { buffer, filename, folderPath } = payload;
+  if (!folderPath || !filename) throw new Error("Missing folderPath or filename");
+
+  // Ensure the folder exists
+  await fs.mkdir(folderPath, { recursive: true });
+  const filePath = path.join(folderPath, filename);
+  await fs.writeFile(filePath, Buffer.from(buffer));
+  return filePath;
+});
+
 // ── IPC: App info ──────────────────────────────────────────────────────────────
 
 // Returns the version from package.json immediately (no async needed)
 ipcMain.handle("app:version", () => app.getVersion());
+
 
 // ── App lifecycle ──────────────────────────────────────────────────────────────
 

@@ -15,6 +15,10 @@ declare global {
       saveAppConfig: (config: RecorderConfig) => Promise<RecorderConfig>;
       getAppConfigPath?: () => Promise<string>;
 
+      // Save path
+      selectSavePath?: () => Promise<string | null>;
+      saveRecording?: (buffer: ArrayBuffer, filename: string, folderPath: string) => Promise<string>;
+
       // App info
       getAppVersion: () => Promise<string>;
 

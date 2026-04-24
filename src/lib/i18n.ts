@@ -70,6 +70,14 @@ const en = {
   runtimeDesktop: "Electron desktop profile",
   runtimeBrowser: "Browser fallback profile",
   configPathLabel: "Config Path",
+  // ── Save path ─────────────────────────────────────────────────
+  savePathSection: "Recording Save Location",
+  savePathHint: "Choose the folder where recordings will be saved.",
+  savePathNotSet: "Not configured — you will be prompted before recording",
+  savePathBrowse: "Browse…",
+  savePathChange: "Change Folder",
+  savePathRequired: "Please select a save folder before recording.",
+  savePathSaved: "Saved to:",
 } as const;
 
 const th: Translations = {
@@ -130,6 +138,14 @@ const th: Translations = {
   runtimeDesktop: "โปรไฟล์เดสก์ท็อป Electron",
   runtimeBrowser: "โปรไฟล์เบราว์เซอร์",
   configPathLabel: "ที่อยู่ไฟล์ตั้งค่า",
+  // ── Save path ─────────────────────────────────────────────────
+  savePathSection: "โฟลเดอร์บันทึกวิดีโอ",
+  savePathHint: "เลือกโฟลเดอร์สำหรับจัดเก็บไฟล์วิดีโอที่บันทึกไว้",
+  savePathNotSet: "ยังไม่ได้ตั้งค่า — จะถามก่อนเริ่มบันทึก",
+  savePathBrowse: "เลือกโฟลเดอร์…",
+  savePathChange: "เปลี่ยนโฟลเดอร์",
+  savePathRequired: "กรุณาเลือกโฟลเดอร์บันทึกก่อนเริ่มอัดวิดีโอ",
+  savePathSaved: "บันทึกไปที่:",
 };
 
 export const translations: Record<Lang, Translations> = { en, th };

@@ -16,6 +16,14 @@ export function SettingsPanel() {
 
   const isSaving = saveState === "saving";
 
+  // ── Save path picker ───────────────────────────────────────────────────────
+  const handleBrowseSavePath = async () => {
+    const chosen = await window.electronAPI?.selectSavePath?.();
+    if (chosen) {
+      setDraft((cur) => ({ ...cur, savePath: chosen }));
+    }
+  };
+
   return (
     <section className="glass-card p-6 grid gap-8 max-w-2xl w-full mx-auto">
 
@@ -83,6 +91,35 @@ export function SettingsPanel() {
               ? "การตั้งค่าไมโครโฟนอยู่ที่หน้าบันทึกหลัก — ส่วน \"แหล่งเสียง\""
               : "Microphone toggle is on the main Recorder page — under \"Audio Input\""}
           </p>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-800/60" />
+
+      {/* ── Save Location ──────────────────────────────────────────── */}
+      <div className="grid gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200">{t.savePathSection}</h3>
+          <p className="text-xs text-slate-500 mt-0.5">{t.savePathHint}</p>
+        </div>
+
+        <div className="flex items-center gap-3 rounded-xl border border-slate-700/50 bg-[#13161a]/50 p-4">
+          {/* Folder icon */}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          <div className="flex-1 min-w-0">
+            {draft.savePath
+              ? <p className="text-xs text-slate-300 font-mono truncate" title={draft.savePath}>{draft.savePath}</p>
+              : <p className="text-xs text-amber-400/80 italic">{t.savePathNotSet}</p>
+            }
+          </div>
+          <button type="button"
+            onClick={() => void handleBrowseSavePath()}
+            disabled={isSaving}
+            className="shrink-0 rounded-lg bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-xs font-semibold text-slate-200 transition disabled:opacity-50">
+            {draft.savePath ? t.savePathChange : t.savePathBrowse}
+          </button>
         </div>
       </div>
 
