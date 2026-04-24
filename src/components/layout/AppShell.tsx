@@ -14,12 +14,24 @@ type AppShellProps = { children: ReactNode };
 
 export const AppShell = memo(function AppShell({ children }: AppShellProps) {
   const { t } = useLang();
-  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string>("…");
   const [update, setUpdate] = useState<UpdateState>({ status: "idle" });
   const [dismissed, setDismissed] = useState(false);
 
+  // Retry version fetch — IPC may not be ready on first render
   useEffect(() => {
-    window.electronAPI?.getAppVersion?.().then(setAppVersion).catch(() => {});
+    let attempts = 0;
+    const tryFetch = () => {
+      if (!window.electronAPI?.getAppVersion) {
+        if (++attempts < 10) setTimeout(tryFetch, 300);
+        return;
+      }
+      window.electronAPI
+        .getAppVersion()
+        .then((v) => { if (v) setAppVersion(v); })
+        .catch(() => { if (++attempts < 10) setTimeout(tryFetch, 300); });
+    };
+    tryFetch();
   }, []);
 
   useEffect(() => {
@@ -51,11 +63,13 @@ export const AppShell = memo(function AppShell({ children }: AppShellProps) {
             </p>
             <h1 className="flex items-baseline gap-2 text-2xl font-bold tracking-tight text-white sm:text-3xl">
               Screen<span className="text-cyan-400">Studio</span>
-              {appVersion && (
-                <span className="ml-1 text-[0.55rem] font-mono text-slate-500 border border-slate-700/60 rounded-full px-2 py-0.5 leading-none">
-                  v{appVersion}
-                </span>
-              )}
+              <span className={`ml-1 text-[0.55rem] font-mono border rounded-full px-2 py-0.5 leading-none transition-opacity ${
+                appVersion === "…"
+                  ? "text-slate-700 border-slate-800/40 opacity-50"
+                  : "text-slate-500 border-slate-700/60"
+              }`}>
+                v{appVersion}
+              </span>
             </h1>
             <p className="mt-0.5 hidden text-xs text-slate-400 sm:block">{t.appDesc}</p>
           </div>

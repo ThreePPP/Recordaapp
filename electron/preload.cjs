@@ -17,13 +17,23 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getAppConfigPath: () => ipcRenderer.invoke("config:path"),
 
   // ── App info ─────────────────────────────────────────────────────────────
+  // Synchronous-style wrapper — resolves immediately since main returns a value
   getAppVersion: () => ipcRenderer.invoke("app:version"),
+
+  // ── Media permissions ────────────────────────────────────────────────────
+  // Call when user enables microphone to ensure OS permission is granted
+  requestMicrophonePermission: () =>
+    ipcRenderer.invoke("permissions:request-microphone"),
+  // Returns "granted" | "denied" | "not-determined" | "restricted"
+  getMicrophoneStatus: () =>
+    ipcRenderer.invoke("permissions:microphone-status"),
 
   // ── Hotkey events ────────────────────────────────────────────────────────
   onToggleRecording: (callback) => {
     const handler = () => callback();
     ipcRenderer.on("shortcut:toggle-recording", handler);
-    return () => ipcRenderer.removeListener("shortcut:toggle-recording", handler);
+    return () =>
+      ipcRenderer.removeListener("shortcut:toggle-recording", handler);
   },
   onStopSharing: (callback) => {
     const handler = () => callback();
@@ -35,12 +45,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onUpdateAvailable: (callback) => {
     const handler = (_event, info) => callback(info);
     ipcRenderer.on("updater:update-available", handler);
-    return () => ipcRenderer.removeListener("updater:update-available", handler);
+    return () =>
+      ipcRenderer.removeListener("updater:update-available", handler);
   },
   onUpdateDownloaded: (callback) => {
     const handler = (_event, info) => callback(info);
     ipcRenderer.on("updater:update-downloaded", handler);
-    return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
+    return () =>
+      ipcRenderer.removeListener("updater:update-downloaded", handler);
   },
   installUpdate: () => ipcRenderer.invoke("updater:install-now"),
 });

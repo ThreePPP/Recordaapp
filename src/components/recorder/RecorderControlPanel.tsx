@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import {
   getBitratePreset,
   MAX_RECORDING_MINUTES_PRESETS,
@@ -131,6 +131,22 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
     ? includeMicrophone ? `${t.systemAudio} + ${t.microphone}` : t.systemAudio
     : includeMicrophone ? t.microphone : "Muted";
 
+  // Request OS microphone permission before enabling mic capture
+  const handleMicToggle = useCallback(async () => {
+    if (includeMicrophone) {
+      // Turning off — no permission needed
+      onMicrophoneChange(false);
+      return;
+    }
+    // Turning on — ask OS for permission first
+    const granted = await window.electronAPI
+      ?.requestMicrophonePermission?.();
+    // granted is undefined in browser mode (non-Electron) — allow anyway
+    if (granted !== false) {
+      onMicrophoneChange(true);
+    }
+  }, [includeMicrophone, onMicrophoneChange]);
+
   return (
     <aside className="glass-card panel-scroll flex flex-col gap-0 overflow-hidden">
 
@@ -207,9 +223,9 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
               }`}>{includeSystemAudio ? "ON" : "OFF"}</span>
             </button>
 
-            {/* Microphone */}
+            {/* Microphone — requests OS permission on first enable */}
             <button type="button" disabled={isRecording}
-              onClick={() => onMicrophoneChange(!includeMicrophone)}
+              onClick={() => void handleMicToggle()}
               aria-pressed={includeMicrophone}
               className={`audio-btn flex-col h-auto py-3 ${includeMicrophone ? "active" : ""}`}>
               <IconMic />
