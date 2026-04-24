@@ -12,16 +12,8 @@ export function RecorderWorkspace() {
     configReady: !appConfig.isLoading,
   });
 
-  const audioProfileLabel = appConfig.config.includeSystemAudio
-    ? appConfig.config.includeMicrophone
-      ? "System + microphone"
-      : "System audio"
-    : appConfig.config.includeMicrophone
-      ? "Microphone only"
-      : "Muted";
-
   return (
-    <section className="grid items-start gap-4 lg:grid-cols-[400px_1fr]">
+    <section className="workspace">
       <RecorderControlPanel
         isElectronBridgeReady={recorder.isElectronBridgeReady}
         sources={recorder.sources}
@@ -31,18 +23,18 @@ export function RecorderWorkspace() {
         isRecording={recorder.isRecording}
         recordingDuration={recorder.recordingDuration}
         hasCrop={recorder.hasCrop}
-        audioProfileLabel={audioProfileLabel}
+        // ── Audio props (now direct booleans instead of a label string)
+        includeSystemAudio={appConfig.config.includeSystemAudio}
+        includeMicrophone={appConfig.config.includeMicrophone}
         configLoading={appConfig.isLoading}
         configSaving={appConfig.saveState === "saving"}
         videoBitrateKbps={appConfig.config.videoBitrateKbps}
         maxRecordingMinutes={appConfig.config.maxRecordingMinutes}
         onSourceChange={recorder.setSelectedSourceId}
-        onVideoBitrateChange={(bitrateKbps) => {
-          void appConfig.updateConfig({ videoBitrateKbps: bitrateKbps });
-        }}
-        onMaxRecordingMinutesChange={(minutes) => {
-          void appConfig.updateConfig({ maxRecordingMinutes: minutes });
-        }}
+        onVideoBitrateChange={(kbps) => void appConfig.updateConfig({ videoBitrateKbps: kbps })}
+        onMaxRecordingMinutesChange={(min) => void appConfig.updateConfig({ maxRecordingMinutes: min })}
+        onSystemAudioChange={(enabled) => void appConfig.updateConfig({ includeSystemAudio: enabled })}
+        onMicrophoneChange={(enabled) => void appConfig.updateConfig({ includeMicrophone: enabled })}
         onRefreshSources={recorder.refreshElectronSources}
         onStartSharing={recorder.startSharing}
         onStopSharing={recorder.stopSharing}
@@ -55,6 +47,7 @@ export function RecorderWorkspace() {
         overlayRef={recorder.overlayRef}
         previewVideoRef={recorder.previewVideoRef}
         isSharing={recorder.isSharing}
+        isRecording={recorder.isRecording}
         displayedCrop={recorder.displayedCrop}
         previewWidth={recorder.previewWidth}
         previewHeight={recorder.previewHeight}
