@@ -31,6 +31,11 @@ app.commandLine.appendSwitch("allow-http-screen-capture");
 //   "Invalid file descriptor to ICU data received" error on Windows
 //   because Chromium GPU subprocesses cannot inherit the ICU fd.
 
+// Disable GPU process to prevent ICU file descriptor error on Windows.
+// Screen recording uses the renderer's MediaRecorder API — GPU accel is
+// not needed in the Electron main process for this use case.
+app.disableHardwareAcceleration();
+
 // ── Config helpers ─────────────────────────────────────────────────────────────
 
 function normalizeBitrateKbps(value) {
