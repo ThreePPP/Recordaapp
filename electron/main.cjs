@@ -24,12 +24,12 @@ const DEFAULT_RECORDER_CONFIG = {
 };
 
 // ── Command-line switches ──────────────────────────────────────────────────────
-// Required for desktopCapturer + getUserMedia in renderer
+// These two flags are required for desktopCapturer + screen getUserMedia
 app.commandLine.appendSwitch("enable-usermedia-screen-capturing");
 app.commandLine.appendSwitch("allow-http-screen-capture");
-// GPU acceleration hints (safe — do not touch sandbox flags here)
-app.commandLine.appendSwitch("enable-accelerated-video-decode");
-app.commandLine.appendSwitch("enable-gpu-rasterization");
+// NOTE: Do NOT add --no-sandbox or GPU switches here — they cause the
+//   "Invalid file descriptor to ICU data received" error on Windows
+//   because Chromium GPU subprocesses cannot inherit the ICU fd.
 
 // ── Config helpers ─────────────────────────────────────────────────────────────
 
