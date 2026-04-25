@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DEFAULT_RECORDER_CONFIG,
   normalizeRecorderConfig,
@@ -18,79 +18,62 @@ export function useAppConfig() {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [statusText, setStatusText] = useState("Loading configuration...");
 
-  const isDesktopMode =
+  // Memoize once — never changes after the initial render
+  const isDesktopMode = useRef(
     typeof window !== "undefined" &&
-    Boolean(window.electronAPI?.getAppConfig && window.electronAPI?.saveAppConfig);
+    Boolean(window.electronAPI?.getAppConfig && window.electronAPI?.saveAppConfig),
+  ).current;
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadConfig() {
       try {
+        let loaded: RecorderConfig;
+
         if (window.electronAPI?.getAppConfig) {
-          const loadedConfig = await window.electronAPI.getAppConfig();
-          if (!isMounted) {
-            return;
+          const raw = await window.electronAPI.getAppConfig();
+          loaded = normalizeRecorderConfig(raw);
+          if (isMounted && window.electronAPI.getAppConfigPath) {
+            setConfigPath(await window.electronAPI.getAppConfigPath());
           }
-
-          setConfig(normalizeRecorderConfig(loadedConfig));
-          setStatusText("Configuration loaded from desktop profile");
-
-          if (window.electronAPI.getAppConfigPath) {
-            const loadedPath = await window.electronAPI.getAppConfigPath();
-            if (isMounted) {
-              setConfigPath(loadedPath);
-            }
-          }
+          if (isMounted) setStatusText("Configuration loaded from desktop profile");
         } else {
           const raw = localStorage.getItem(LOCAL_CONFIG_KEY);
-          const localConfig = raw
+          loaded = raw
             ? normalizeRecorderConfig(JSON.parse(raw) as Partial<RecorderConfig>)
             : DEFAULT_RECORDER_CONFIG;
-
-          if (!isMounted) {
-            return;
-          }
-
-          setConfig(localConfig);
-          setStatusText("Configuration loaded from browser storage");
+          if (isMounted) setStatusText("Configuration loaded from browser storage");
         }
+
+        if (isMounted) setConfig(loaded);
       } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setConfig(DEFAULT_RECORDER_CONFIG);
-        setStatusText("Failed to read config. Fallback to defaults.");
-      } finally {
         if (isMounted) {
-          setIsLoading(false);
+          setConfig(DEFAULT_RECORDER_CONFIG);
+          setStatusText("Failed to read config. Fallback to defaults.");
         }
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     }
 
     void loadConfig();
-
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, []);
 
   const saveConfig = useCallback(async (nextConfig: RecorderConfig) => {
     const normalized = normalizeRecorderConfig(nextConfig);
     setSaveState("saving");
-
     try {
       if (window.electronAPI?.saveAppConfig) {
-        const savedConfig = await window.electronAPI.saveAppConfig(normalized);
-        setConfig(normalizeRecorderConfig(savedConfig));
+        const saved = await window.electronAPI.saveAppConfig(normalized);
+        setConfig(normalizeRecorderConfig(saved));
         setStatusText("Configuration saved to desktop profile");
       } else {
         localStorage.setItem(LOCAL_CONFIG_KEY, JSON.stringify(normalized));
         setConfig(normalized);
         setStatusText("Configuration saved to browser storage");
       }
-
       setSaveState("saved");
       return true;
     } catch {
@@ -101,20 +84,9 @@ export function useAppConfig() {
   }, []);
 
   const updateConfig = useCallback(
-    async (partial: Partial<RecorderConfig>) => {
-      return saveConfig({ ...config, ...partial });
-    },
+    async (partial: Partial<RecorderConfig>) => saveConfig({ ...config, ...partial }),
     [config, saveConfig],
   );
 
-  return {
-    config,
-    configPath,
-    isLoading,
-    isDesktopMode,
-    saveState,
-    statusText,
-    saveConfig,
-    updateConfig,
-  };
+  return { config, configPath, isLoading, isDesktopMode, saveState, statusText, saveConfig, updateConfig };
 }

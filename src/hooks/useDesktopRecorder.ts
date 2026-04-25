@@ -31,7 +31,6 @@ function pickFormat(): RecordFormat {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type CropSelectionEvent = ReactPointerEvent<HTMLDivElement>;
-
 type Options = { config: RecorderConfig; configReady: boolean };
 
 export type DesktopRecorderController = {
@@ -85,10 +84,10 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   // ── Refs ───────────────────────────────────────────────────────────────────
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
-  const rawStreamRef = useRef<MediaStream | null>(null);   // from Electron desktop capture
-  const sourceStreamRef = useRef<MediaStream | null>(null); // video + mixed audio
+  const rawStreamRef = useRef<MediaStream | null>(null);
+  const sourceStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
-  const cropStreamRef = useRef<MediaStream | null>(null);   // canvas-based cropped stream
+  const cropStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -98,9 +97,17 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   const recordStartTimeRef = useRef<number>(0);
   const isSharingStartingRef = useRef(false);
   const autoPreviewedRef = useRef("");
-  const isRecordingRef = useRef(false); // sync ref for IPC callbacks
+  // Sync refs — used inside IPC callbacks / async closures where stale state is a risk
+  const isRecordingRef = useRef(false);
   const isPausedRef = useRef(false);
   const savePathRef = useRef(config.savePath);
+  const configRef = useRef(config);
+
+  // Keep refs in sync with latest values on every render (no extra effects needed)
+  isRecordingRef.current = isRecording;
+  isPausedRef.current = isPaused;
+  savePathRef.current = config.savePath;
+  configRef.current = config;
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const selectedSource = useMemo(
@@ -129,51 +136,40 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     if (autoStopRef.current) { clearTimeout(autoStopRef.current); autoStopRef.current = null; }
   }, []);
 
-  const stopCropStream = useCallback(() => {
-    if (cropStreamRef.current) {
-      cropStreamRef.current.getTracks().forEach((t) => t.stop());
-      cropStreamRef.current = null;
+  /** Stop and nullify a set of MediaStreams. */
+  const stopStreams = useCallback((...streamRefs: Array<React.MutableRefObject<MediaStream | null>>) => {
+    for (const ref of streamRefs) {
+      ref.current?.getTracks().forEach((t) => t.stop());
+      ref.current = null;
     }
   }, []);
 
   const stopAudioResources = useCallback(() => {
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
-    }
+    stopStreams(micStreamRef);
     if (audioCtxRef.current) {
       void audioCtxRef.current.close();
       audioCtxRef.current = null;
     }
-  }, []);
+  }, [stopStreams]);
 
   // ── Shared: stop sharing ───────────────────────────────────────────────────
 
   const stopSharing = useCallback(() => {
-    if (recorderRef.current?.state !== "inactive") {
-      recorderRef.current?.stop();
-    }
+    if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
 
     stopRaf();
-    stopCropStream();
+    stopStreams(cropStreamRef, rawStreamRef, sourceStreamRef);
     stopAudioResources();
-
-    rawStreamRef.current?.getTracks().forEach((t) => t.stop());
-    rawStreamRef.current = null;
-
-    sourceStreamRef.current?.getTracks().forEach((t) => t.stop());
-    sourceStreamRef.current = null;
 
     if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
 
     setIsSharing(false);
     setIsRecording(false);
     setIsPaused(false);
-    isPausedRef.current = false;
     setRecordingDuration(0);
     stopTimers();
     setStatus("Capture stopped");
-  }, [stopAudioResources, stopCropStream, stopRaf, stopTimers]);
+  }, [stopAudioResources, stopRaf, stopStreams, stopTimers]);
 
   // ── Electron: list sources ─────────────────────────────────────────────────
 
@@ -187,9 +183,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       const types: CaptureSourceType[] = ["screen", "window"];
       const list = await window.electronAPI.listCaptureSources(types);
       setSources(list);
-      if (list.length > 0) {
-        setSelectedSourceIdRaw((cur) => cur || list[0].id);
-      }
+      if (list.length > 0) setSelectedSourceIdRaw((cur) => cur || list[0].id);
       setStatus(`Found ${list.length} capture sources`);
     } catch {
       setSources([]);
@@ -199,37 +193,34 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
   // ── Media: acquire desktop stream ─────────────────────────────────────────
 
-  const acquireDesktopStream = useCallback(async () => {
-    if (!selectedSourceId) throw new Error("No source selected");
+  const acquireDesktopStream = useCallback(async (sourceId: string, includeSystemAudio: boolean) => {
+    if (!sourceId) throw new Error("No source selected");
 
     const videoConstraints = {
       mandatory: {
         chromeMediaSource: "desktop",
-        chromeMediaSourceId: selectedSourceId,
+        chromeMediaSourceId: sourceId,
         minWidth: 1280, minHeight: 720,
         maxWidth: 7680, maxHeight: 4320,
       },
     } as MediaTrackConstraints;
 
-    const audioConstraints = {
-      mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: selectedSourceId },
-    } as MediaTrackConstraints;
-
     const getStream = (audio: boolean) =>
-      navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: audio ? audioConstraints : false });
+      navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: audio ? ({ mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: sourceId } } as MediaTrackConstraints) : false,
+      });
 
-    if (!config.includeSystemAudio) return getStream(false);
-
+    if (!includeSystemAudio) return getStream(false);
     try { return await getStream(true); }
     catch { setStatus("System audio unavailable, continuing without it"); return getStream(false); }
-  }, [config.includeSystemAudio, selectedSourceId]);
+  }, []);
 
   // ── Media: mix audio tracks ────────────────────────────────────────────────
 
   const mixAudio = useCallback((tracks: MediaStreamTrack[]): MediaStreamTrack | null => {
     if (tracks.length === 0) return null;
     if (tracks.length === 1) return tracks[0];
-
     try {
       const ctx = new AudioContext();
       const dest = ctx.createMediaStreamDestination();
@@ -253,11 +244,12 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       setCropRect(null);
       setDragState(null);
 
-      const raw = await acquireDesktopStream();
+      const { includeSystemAudio, includeMicrophone } = configRef.current;
+      const raw = await acquireDesktopStream(selectedSourceId, includeSystemAudio);
       rawStreamRef.current = raw;
 
       let micStream: MediaStream | null = null;
-      if (config.includeMicrophone) {
+      if (includeMicrophone) {
         try {
           micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
           micStreamRef.current = micStream;
@@ -280,8 +272,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       if (previewVideoRef.current) {
         previewVideoRef.current.srcObject = merged;
         await previewVideoRef.current.play();
-        const w = previewVideoRef.current.videoWidth;
-        const h = previewVideoRef.current.videoHeight;
+        const { videoWidth: w, videoHeight: h } = previewVideoRef.current;
         if (w > 0 && h > 0) { setPreviewWidth(w); setPreviewHeight(h); }
       }
 
@@ -296,7 +287,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     } finally {
       isSharingStartingRef.current = false;
     }
-  }, [acquireDesktopStream, config.includeMicrophone, config.microphoneDeviceId, mixAudio, selectedSource?.name, stopSharing]);
+  }, [acquireDesktopStream, mixAudio, selectedSource?.name, selectedSourceId, stopSharing]);
 
   // ── Capture: build output stream (with optional crop canvas) ──────────────
 
@@ -305,10 +296,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     const video = previewVideoRef.current;
     if (!source || !video) throw new Error("Missing stream or video element");
 
-    // No crop → record raw stream directly
     if (!hasValidCrop(cropRect)) return source;
 
-    // Crop → draw region into a canvas and stream that
     const safe = clampRect(cropRect, previewWidth, previewHeight);
     const scaleX = (video.videoWidth || previewWidth) / previewWidth;
     const scaleY = (video.videoHeight || previewHeight) / previewHeight;
@@ -327,12 +316,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
     const interval = 1000 / OUTPUT_FPS;
     let last = 0;
-
     const draw = (t: number) => {
-      if (t - last >= interval) {
-        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
-        last = t;
-      }
+      if (t - last >= interval) { ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh); last = t; }
       rafRef.current = requestAnimationFrame(draw);
     };
     rafRef.current = requestAnimationFrame(draw);
@@ -349,114 +334,92 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     chunks: Blob[],
     format: RecordFormat,
     durationMs: number,
-    preferredSavePath?: string,
+    folderPath: string,
   ) => {
     const raw = new Blob(chunks, {
       type: format.mimeType || (format.ext === "mp4" ? "video/mp4" : "video/webm"),
     });
-
     const filename = `record-${new Date().toISOString().replace(/[:.]/g, "-")}.${format.ext}`;
-    const folderPath = preferredSavePath ?? savePathRef.current;
 
     const doSave = async (blob: Blob) => {
-      // ── Electron: write to disk via IPC ──────────────────────────────────
       if (window.electronAPI?.saveRecording && folderPath) {
         try {
           const buffer = await blob.arrayBuffer();
           const saved = await window.electronAPI.saveRecording(buffer, filename, folderPath);
           setStatus(`${filename} saved`);
           setLatestRecordingPath(saved);
-          console.info("[recorder] saved →", saved);
           return;
         } catch (err) {
           console.error("[recorder] IPC save failed, falling back to download", err);
         }
       }
-      // ── Browser fallback: trigger download ───────────────────────────────
+      // Browser fallback
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
+      const a = Object.assign(document.createElement("a"), { href: url, download: filename });
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     };
 
-    // Fix duration so the seek bar works, then save
     fixBlobDuration(raw, durationMs)
       .then(doSave)
-      .catch(() => void doSave(raw)); // fallback: save without fix
+      .catch(() => void doSave(raw));
   }, []);
-
 
   // ── Recording: start ───────────────────────────────────────────────────────
 
   const startRecording = useCallback(async () => {
     if (!configReady) { setStatus("Loading settings…"); return; }
-    if (isRecording) return;
+    if (isRecordingRef.current) return;
 
-    let activeSavePath = config.savePath;
+    // Read latest config from ref (avoids stale closure & removes config deps)
+    const cfg = configRef.current;
+    let activeSavePath = cfg.savePath;
 
-    // ── Ensure a save folder is configured before starting ────────────────
-    if (window.electronAPI?.selectSavePath && !config.savePath) {
+    if (window.electronAPI?.selectSavePath && !activeSavePath) {
       setStatus("Please select a save folder…");
       const chosen = await window.electronAPI.selectSavePath();
-      if (!chosen) {
-        setStatus("Recording cancelled — no save folder selected.");
-        return;
-      }
-
+      if (!chosen) { setStatus("Recording cancelled — no save folder selected."); return; }
       try {
-        // Persist selected folder for future sessions.
         if (window.electronAPI?.saveAppConfig) {
-          await window.electronAPI.saveAppConfig({ ...config, savePath: chosen });
+          await window.electronAPI.saveAppConfig({ ...cfg, savePath: chosen });
         }
       } catch {
         setStatus("Failed to save selected folder. Try again.");
         return;
       }
-
       activeSavePath = chosen;
       savePathRef.current = chosen;
     }
 
-    if (!sourceStreamRef.current) {
-      if (!await startSharing()) return;
-    }
+    if (!sourceStreamRef.current && !await startSharing()) return;
 
     try {
       chunksRef.current = [];
       stopRaf();
-      stopCropStream();
+      stopStreams(cropStreamRef);
       stopTimers();
 
       const stream = buildOutputStream();
       const format = pickFormat();
-      const opts: MediaRecorderOptions = {
-        videoBitsPerSecond: config.videoBitrateKbps * 1000,
+      const recorder = new MediaRecorder(stream, {
+        videoBitsPerSecond: cfg.videoBitrateKbps * 1000,
         audioBitsPerSecond: AUDIO_BITRATE_BPS,
         ...(format.mimeType ? { mimeType: format.mimeType } : {}),
-      };
-
-      const recorder = new MediaRecorder(stream, opts);
+      });
       recorderRef.current = recorder;
       recordStartTimeRef.current = Date.now();
 
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-
       recorder.onstop = () => {
         const durationMs = Date.now() - recordStartTimeRef.current;
         stopRaf();
-        stopCropStream();
+        stopStreams(cropStreamRef);
         setIsRecording(false);
         setRecordingDuration(0);
         stopTimers();
         recorderRef.current = null;
 
-        if (chunksRef.current.length === 0) {
-          setStatus("Recording stopped — no data captured");
-          return;
-        }
-
+        if (chunksRef.current.length === 0) { setStatus("Recording stopped — no data captured"); return; }
         saveRecording(chunksRef.current, format, durationMs, activeSavePath);
         chunksRef.current = [];
         setStatus(`Done! Saved as .${format.ext}`);
@@ -467,47 +430,36 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       setRecordingDuration(0);
 
       timerRef.current = setInterval(() => {
-        if (!isPausedRef.current) {
-          setRecordingDuration((d) => d + 1);
-        }
+        if (!isPausedRef.current) setRecordingDuration((d) => d + 1);
       }, 1000);
 
-      if (config.maxRecordingMinutes > 0) {
+      if (cfg.maxRecordingMinutes > 0) {
         autoStopRef.current = setTimeout(() => {
           if (recorderRef.current?.state !== "inactive") {
-            setStatus(`Auto-stop: ${config.maxRecordingMinutes}m limit reached`);
+            setStatus(`Auto-stop: ${cfg.maxRecordingMinutes}m limit reached`);
             recorderRef.current?.stop();
           }
-        }, config.maxRecordingMinutes * 60_000);
+        }, cfg.maxRecordingMinutes * 60_000);
       }
 
-      const mbps = (config.videoBitrateKbps / 1000).toFixed(1);
-      const limit = config.maxRecordingMinutes > 0 ? ` · auto-stop ${config.maxRecordingMinutes}m` : "";
+      const mbps = (cfg.videoBitrateKbps / 1000).toFixed(1);
+      const limit = cfg.maxRecordingMinutes > 0 ? ` · auto-stop ${cfg.maxRecordingMinutes}m` : "";
       setStatus(`● REC at ${mbps} Mbps${limit} [${format.ext.toUpperCase()}]`);
     } catch {
       setStatus("Failed to start recording");
     }
-  }, [
-    buildOutputStream, config.maxRecordingMinutes, config.videoBitrateKbps,
-    configReady, isRecording, saveRecording, startSharing,
-    stopCropStream, stopRaf, stopTimers,
-  ]);
+  }, [buildOutputStream, configReady, saveRecording, startSharing, stopRaf, stopStreams, stopTimers]);
 
-  // ── Recording: stop ────────────────────────────────────────────────────────
+  // ── Recording: stop / pause / resume ──────────────────────────────────────
 
   const stopRecording = useCallback(() => {
-    if (recorderRef.current?.state !== "inactive") {
-      recorderRef.current?.stop();
-    }
+    if (recorderRef.current?.state !== "inactive") recorderRef.current?.stop();
   }, []);
-
-  // ── Recording: pause / resume ──────────────────────────────────────────────
 
   const pauseRecording = useCallback(() => {
     if (recorderRef.current?.state === "recording") {
       recorderRef.current.pause();
       setIsPaused(true);
-      isPausedRef.current = true;
       setStatus("Recording paused");
     }
   }, []);
@@ -516,7 +468,6 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     if (recorderRef.current?.state === "paused") {
       recorderRef.current.resume();
       setIsPaused(false);
-      isPausedRef.current = false;
       setStatus("Recording resumed");
     }
   }, []);
@@ -560,12 +511,6 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     })();
     return () => { cancelled = true; };
   }, [isElectronBridgeReady, selectedSourceId, startSharing]);
-
-  // Sync isRecording to ref for IPC callbacks
-  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
-
-  // Keep latest save path available for async save handlers.
-  useEffect(() => { savePathRef.current = config.savePath; }, [config.savePath]);
 
   // Register global IPC hotkeys
   useEffect(() => {
