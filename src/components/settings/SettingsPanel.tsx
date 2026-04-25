@@ -6,12 +6,17 @@ import { useLang } from "@/hooks/useLang";
 import { LANGUAGES, type Lang } from "@/lib/i18n";
 import { type RecorderConfig } from "@/types/config";
 
+// ── Main Settings Panel ──────────────────────────────────────────────────────
+
 export function SettingsPanel() {
   const { config, configPath, isLoading, isDesktopMode, saveState, statusText, saveConfig } =
     useAppConfig();
   const { lang, t, setLang } = useLang();
 
   const [draft, setDraft] = useState<RecorderConfig>(config);
+  const [mounted, setMounted] = useState(false);
+  // Ensure client-only render (avoids SSR/hydration mismatch in Electron static export)
+  useEffect(() => { setMounted(true); }, []);
   useEffect(() => { setDraft(config); }, [config]);
 
   const isSaving = saveState === "saving";
@@ -23,6 +28,14 @@ export function SettingsPanel() {
       setDraft((cur) => ({ ...cur, savePath: chosen }));
     }
   };
+
+  if (!mounted) {
+    return (
+      <section className="glass-card p-6 max-w-2xl w-full mx-auto flex items-center justify-center min-h-[200px]">
+        <span className="text-sm text-slate-500 animate-pulse">Loading settings…</span>
+      </section>
+    );
+  }
 
   return (
     <section className="glass-card p-6 grid gap-8 max-w-2xl w-full mx-auto">
@@ -54,43 +67,6 @@ export function SettingsPanel() {
               {code === "th" ? "🇹🇭" : "🇬🇧"} {label}
             </button>
           ))}
-        </div>
-      </div>
-
-      <div className="border-t border-slate-800/60" />
-
-      {/* ── Audio default ─────────────────────────────────────────── */}
-      <div className="grid gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-200">{t.audioInput}</h3>
-          <p className="text-xs text-slate-500 mt-0.5">{t.settingsDesc}</p>
-        </div>
-
-        {/* System audio only — mic is controlled from the main recorder panel */}
-        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-700/50 bg-[#13161a]/50 p-4 transition hover:bg-[#13161a]">
-          <input
-            type="checkbox"
-            checked={draft.includeSystemAudio}
-            onChange={(e) => setDraft((cur) => ({ ...cur, includeSystemAudio: e.target.checked }))}
-            disabled={isLoading || isSaving}
-            className="mt-0.5 h-4 w-4 rounded border-slate-600 bg-slate-800 text-cyan-500 outline-none focus:ring-2 focus:ring-cyan-500/50"
-          />
-          <div className="grid gap-1">
-            <span className="text-sm font-medium text-slate-300">{t.systemAudioLabel}</span>
-            <span className="text-xs text-slate-500">{t.systemAudioDesc}</span>
-          </div>
-        </label>
-
-        {/* Mic note — redirect to main page */}
-        <div className="flex items-start gap-3 rounded-xl border border-slate-700/30 bg-slate-800/20 px-4 py-3">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0" aria-hidden>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            {lang === "th"
-              ? "การตั้งค่าไมโครโฟนอยู่ที่หน้าบันทึกหลัก — ส่วน \"แหล่งเสียง\""
-              : "Microphone toggle is on the main Recorder page — under \"Audio Input\""}
-          </p>
         </div>
       </div>
 
@@ -136,6 +112,8 @@ export function SettingsPanel() {
           {t.resetForm}
         </button>
       </div>
+
+      <div className="border-t border-slate-800/60" />
 
       {/* ── Debug info ───────────────────────────────────────────── */}
       <div className="rounded-xl border border-slate-800/80 bg-[#13161a] p-4 text-xs font-mono text-slate-500 grid gap-2">

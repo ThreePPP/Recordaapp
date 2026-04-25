@@ -38,6 +38,7 @@ export function RecorderWorkspace() {
         onMaxRecordingMinutesChange={(min) => void appConfig.updateConfig({ maxRecordingMinutes: min })}
         onSystemAudioChange={(enabled) => void appConfig.updateConfig({ includeSystemAudio: enabled })}
         onMicrophoneChange={(enabled) => void appConfig.updateConfig({ includeMicrophone: enabled })}
+        onMuteAll={() => void appConfig.updateConfig({ includeSystemAudio: false, includeMicrophone: false })}
         onMicrophoneDeviceChange={(id) => void appConfig.updateConfig({ microphoneDeviceId: id })}
         onRefreshSources={recorder.refreshElectronSources}
         onStartSharing={recorder.startSharing}

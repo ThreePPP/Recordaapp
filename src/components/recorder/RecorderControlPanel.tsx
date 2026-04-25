@@ -71,6 +71,7 @@ type Props = {
   onMaxRecordingMinutesChange: (min: number) => void;
   onSystemAudioChange: (enabled: boolean) => void;
   onMicrophoneChange: (enabled: boolean) => void;
+  onMuteAll: () => void;
   onMicrophoneDeviceChange: (id: string) => void;
   onRefreshSources: () => Promise<void>;
   onStartSharing: () => Promise<boolean>;
@@ -136,6 +137,7 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
   onMaxRecordingMinutesChange,
   onSystemAudioChange,
   onMicrophoneChange,
+  onMuteAll,
   onMicrophoneDeviceChange,
   onRefreshSources,
   onStartSharing,
@@ -259,7 +261,7 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
           {/* Mute all */}
           {(includeSystemAudio || includeMicrophone) && (
             <button type="button" disabled={isRecording}
-              onClick={() => { onSystemAudioChange(false); onMicrophoneChange(false); }}
+              onClick={() => onMuteAll()}
               className="audio-btn w-full justify-center text-[0.65rem] py-1.5 text-rose-400/70 hover:text-rose-300 border-rose-900/40 hover:border-rose-700/50">
               <IconMute /> {t.muteAll}
             </button>
