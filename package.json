@@ -1,6 +1,6 @@
 {
   "name": "recordapp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ScreenStudio — desktop screen recorder built with Electron + Next.js",
   "private": true,
   "main": "electron/main.cjs",
