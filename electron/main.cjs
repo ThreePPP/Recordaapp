@@ -1,5 +1,6 @@
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const { pathToFileURL } = require("node:url");
 const {
   app,
   BrowserWindow,
@@ -15,12 +16,21 @@ const { autoUpdater } = require("electron-updater");
 
 const isDev = !app.isPackaged;
 const CONFIG_FILE_NAME = "app-config.json";
+const ALLOWED_PERMISSION_TYPES = new Set([
+  "media",
+  "mediaKeySystem",
+  "display-capture",
+  "audioCapture",
+  "videoCapture",
+]);
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 const DEFAULT_RECORDER_CONFIG = {
   preferredCaptureMode: "electron",
   includeSystemAudio: true,
   includeMicrophone: false,
   videoBitrateKbps: 8000,
   maxRecordingMinutes: 0,
+  savePath: "",
 };
 
 // ── Command-line switches ──────────────────────────────────────────────────────
@@ -52,6 +62,10 @@ function normalizeMaxRecordingMinutes(value) {
     : DEFAULT_RECORDER_CONFIG.maxRecordingMinutes;
 }
 
+function normalizeSavePath(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function normalizeRecorderConfig(candidate) {
   return {
     preferredCaptureMode:
@@ -64,7 +78,72 @@ function normalizeRecorderConfig(candidate) {
     maxRecordingMinutes: normalizeMaxRecordingMinutes(
       candidate?.maxRecordingMinutes
     ),
+    savePath: normalizeSavePath(candidate?.savePath),
   };
+}
+
+function isDevAppUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    const isHttp = parsed.protocol === "http:" || parsed.protocol === "https:";
+    const isLocalHost =
+      parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    return isHttp && isLocalHost;
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedRenderer(webContents) {
+  const pageUrl = webContents?.getURL?.() || "";
+  if (!pageUrl) {
+    return false;
+  }
+
+  if (isDev) {
+    return isDevAppUrl(pageUrl);
+  }
+
+  return pageUrl.startsWith("file://");
+}
+
+function isAllowedNavigation(rawUrl) {
+  if (isDev) {
+    return isDevAppUrl(rawUrl);
+  }
+  return rawUrl.startsWith("file://");
+}
+
+function isSafeExternalUrl(rawUrl) {
+  try {
+    const protocol = new URL(rawUrl).protocol;
+    return ALLOWED_EXTERNAL_PROTOCOLS.has(protocol);
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeFilename(filename) {
+  if (typeof filename !== "string") {
+    return "";
+  }
+
+  const cleaned = path
+    .basename(filename)
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .trim();
+
+  if (!cleaned || cleaned === "." || cleaned === "..") {
+    return "";
+  }
+
+  return cleaned;
+}
+
+function isPathInside(parentPath, targetPath) {
+  const parent = path.resolve(parentPath);
+  const target = path.resolve(targetPath);
+  return target === parent || target.startsWith(`${parent}${path.sep}`);
 }
 
 function getConfigFilePath() {
@@ -95,7 +174,7 @@ function getStartUrl() {
   if (isDev) {
     return process.env.ELECTRON_START_URL || "http://localhost:3000";
   }
-  return `file://${path.join(__dirname, "..", "out", "index.html")}`;
+  return pathToFileURL(path.join(__dirname, "..", "out", "index.html")).toString();
 }
 
 // ── Permission handlers ────────────────────────────────────────────────────────
@@ -104,31 +183,20 @@ function getStartUrl() {
 
 function setupPermissions(ses) {
   // Allow all permission requests from the app itself
-  ses.setPermissionRequestHandler((_webContents, permission, callback) => {
-    const allowed = [
-      "media",
-      "mediaKeySystem",
-      "geolocation",
-      "notifications",
-      "fullscreen",
-      "openExternal",
-      "display-capture",
-      "audioCapture",
-      "videoCapture",
-    ];
-    callback(allowed.includes(permission));
+  ses.setPermissionRequestHandler((webContents, permission, callback) => {
+    if (!isTrustedRenderer(webContents)) {
+      callback(false);
+      return;
+    }
+    callback(ALLOWED_PERMISSION_TYPES.has(permission));
   });
 
   // Allow permission checks (navigator.permissions.query)
-  ses.setPermissionCheckHandler((_webContents, permission) => {
-    const allowed = [
-      "media",
-      "mediaKeySystem",
-      "display-capture",
-      "audioCapture",
-      "videoCapture",
-    ];
-    return allowed.includes(permission);
+  ses.setPermissionCheckHandler((webContents, permission) => {
+    if (!isTrustedRenderer(webContents)) {
+      return false;
+    }
+    return ALLOWED_PERMISSION_TYPES.has(permission);
   });
 
   // Handle getDisplayMedia — return the chosen Electron source
@@ -248,41 +316,43 @@ function createMainWindow() {
 
   // Prevent navigation to external URLs (open in browser instead)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url);
+    }
     return { action: "deny" };
   });
 
-  // ── Fix Next.js routing in file:// (packaged mode) ──────────────────────────
-  // Next.js <Link> navigates to "/" or "/settings" — but in file:// protocol
-  // these paths don't resolve. Intercept and redirect to the correct HTML file.
-  if (!isDev) {
-    const outDir = path.join(__dirname, "..", "out");
-    mainWindow.webContents.on("will-navigate", (event, url) => {
-      // Only intercept internal file:// navigations
-      if (!url.startsWith("file://")) return;
-      try {
-        const parsed = new URL(url);
-        const pathname = parsed.pathname;
-        // Normalize: strip trailing slash, lowercase
-        const clean = pathname.replace(/\/+$/, "").replace(/\/index\.html$/, "") || "/";
-        let target;
-        if (clean === "" || clean === "/" || clean.endsWith("/index.html")) {
-          target = path.join(outDir, "index.html");
-        } else {
-          // e.g. /settings → out/settings/index.html
-          const seg = clean.replace(/^\//, "");
-          target = path.join(outDir, seg, "index.html");
-        }
-        const fileUrl = `file://${target.replace(/\\/g, "/")}`;
-        if (fileUrl !== url) {
-          event.preventDefault();
-          mainWindow.loadURL(fileUrl);
-        }
-      } catch {
-        // ignore malformed URLs
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!isAllowedNavigation(url)) {
+      event.preventDefault();
+      if (isSafeExternalUrl(url)) {
+        void shell.openExternal(url);
       }
-    });
-  }
+      return;
+    }
+
+    if (isDev || !url.startsWith("file://")) {
+      return;
+    }
+
+    const outDir = path.join(__dirname, "..", "out");
+    try {
+      const parsed = new URL(url);
+      const pathname = parsed.pathname;
+      const clean = pathname.replace(/\/+$/, "").replace(/\/index\.html$/, "") || "/";
+      const target =
+        clean === "" || clean === "/" || clean.endsWith("/index.html")
+          ? path.join(outDir, "index.html")
+          : path.join(outDir, clean.replace(/^\//, ""), "index.html");
+      const targetUrl = pathToFileURL(target).toString();
+      if (targetUrl !== url) {
+        event.preventDefault();
+        mainWindow.loadURL(targetUrl);
+      }
+    } catch {
+      // Ignore malformed URLs from navigation events.
+    }
+  });
 
   mainWindow.loadURL(getStartUrl());
 
@@ -353,13 +423,31 @@ ipcMain.handle("dialog:selectSavePath", async () => {
 // writes the file, and returns the full file path on success.
 ipcMain.handle("file:saveRecording", async (_event, payload) => {
   const { buffer, filename, folderPath } = payload;
-  if (!folderPath || !filename) throw new Error("Missing folderPath or filename");
+  const normalizedFolderPath =
+    typeof folderPath === "string" && folderPath.trim().length > 0
+      ? path.resolve(folderPath)
+      : "";
+  const safeFilename = sanitizeFilename(filename);
+
+  if (!normalizedFolderPath || !safeFilename) {
+    throw new Error("Missing or invalid folderPath/filename");
+  }
 
   // Ensure the folder exists
-  await fs.mkdir(folderPath, { recursive: true });
-  const filePath = path.join(folderPath, filename);
+  await fs.mkdir(normalizedFolderPath, { recursive: true });
+  const filePath = path.resolve(normalizedFolderPath, safeFilename);
+  if (!isPathInside(normalizedFolderPath, filePath)) {
+    throw new Error("Invalid file path");
+  }
+
   await fs.writeFile(filePath, Buffer.from(buffer));
   return filePath;
+});
+
+// ── IPC: Open path ─────────────────────────────────────────────────────────────
+
+ipcMain.handle("file:openPath", (_event, filePath) => {
+  shell.showItemInFolder(filePath);
 });
 
 // ── IPC: App info ──────────────────────────────────────────────────────────────

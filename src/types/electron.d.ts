@@ -18,6 +18,7 @@ declare global {
       // Save path
       selectSavePath?: () => Promise<string | null>;
       saveRecording?: (buffer: ArrayBuffer, filename: string, folderPath: string) => Promise<string>;
+      openPath?: (path: string) => Promise<void>;
 
       // App info
       getAppVersion: () => Promise<string>;

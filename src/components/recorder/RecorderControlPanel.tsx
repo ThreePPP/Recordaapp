@@ -1,4 +1,4 @@
-import { memo, useCallback } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   getBitratePreset,
   MAX_RECORDING_MINUTES_PRESETS,
@@ -62,10 +62,13 @@ type Props = {
   statusText: string;
   isSharing: boolean;
   isRecording: boolean;
+  isPaused: boolean;
+  latestRecordingPath: string | null;
   recordingDuration: number;
   hasCrop: boolean;
   includeSystemAudio: boolean;
   includeMicrophone: boolean;
+  microphoneDeviceId?: string;
   configLoading: boolean;
   configSaving: boolean;
   videoBitrateKbps: number;
@@ -75,11 +78,14 @@ type Props = {
   onMaxRecordingMinutesChange: (min: number) => void;
   onSystemAudioChange: (enabled: boolean) => void;
   onMicrophoneChange: (enabled: boolean) => void;
+  onMicrophoneDeviceChange: (id: string) => void;
   onRefreshSources: () => Promise<void>;
   onStartSharing: () => Promise<boolean>;
   onStopSharing: () => void;
   onStartRecording: () => Promise<void>;
   onStopRecording: () => void;
+  onPauseRecording: () => void;
+  onResumeRecording: () => void;
   onClearCrop: () => void;
 };
 
@@ -103,10 +109,13 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
   statusText,
   isSharing,
   isRecording,
+  isPaused,
+  latestRecordingPath,
   recordingDuration,
   hasCrop,
   includeSystemAudio,
   includeMicrophone,
+  microphoneDeviceId,
   configLoading,
   configSaving,
   videoBitrateKbps,
@@ -116,16 +125,36 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
   onMaxRecordingMinutesChange,
   onSystemAudioChange,
   onMicrophoneChange,
+  onMicrophoneDeviceChange,
   onRefreshSources,
   onStartSharing,
   onStopSharing,
   onStartRecording,
   onStopRecording,
+  onPauseRecording,
+  onResumeRecording,
   onClearCrop,
 }: Props) {
   const { t } = useLang();
   const isConfigBusy = configLoading || configSaving || isRecording;
   const selectedBitratePreset = getBitratePreset(videoBitrateKbps);
+
+  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+
+  useEffect(() => {
+    async function fetchDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setMicDevices(devices.filter((d) => d.kind === "audioinput"));
+      } catch (err) {
+        console.warn("Failed to enumerate devices", err);
+      }
+    }
+    void fetchDevices();
+
+    navigator.mediaDevices.addEventListener("devicechange", fetchDevices);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", fetchDevices);
+  }, []);
 
   const audioStatusText = includeSystemAudio
     ? includeMicrophone ? `${t.systemAudio} + ${t.microphone}` : t.systemAudio
@@ -244,6 +273,21 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
               <IconMute /> {t.muteAll}
             </button>
           )}
+
+          {/* Mic Device Select */}
+          {includeMicrophone && micDevices.length > 0 && (
+            <div className="grid gap-1 mt-1">
+              <span className="text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">{t.microphoneDevice}</span>
+              <select value={microphoneDeviceId || ""} onChange={(e) => onMicrophoneDeviceChange(e.target.value)}
+                disabled={isRecording}
+                className="w-full rounded-lg border border-slate-700 bg-[#101318] px-3 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500 transition cursor-pointer appearance-none">
+                <option value="">{t.defaultDevice}</option>
+                {micDevices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone (${d.deviceId.slice(0, 5)})`}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* ── Quality ────────────────────────────────────────────── */}
@@ -293,20 +337,37 @@ export const RecorderControlPanel = memo(function RecorderControlPanel({
             </button>
           </div>
 
-          <button type="button" onClick={() => void onStartRecording()} disabled={isRecording}
-            className={`${baseBtn} bg-rose-600 text-white hover:bg-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.25)] hover:shadow-[0_0_22px_rgba(244,63,94,0.4)]`}>
-            {isRecording ? `● ${t.recording}` : `● ${t.startRecording}`}
-          </button>
+          {!isRecording ? (
+            <button type="button" onClick={() => void onStartRecording()} disabled={isRecording}
+              className={`${baseBtn} bg-rose-600 text-white hover:bg-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.25)] hover:shadow-[0_0_22px_rgba(244,63,94,0.4)]`}>
+              ● {t.startRecording}
+            </button>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={isPaused ? onResumeRecording : onPauseRecording}
+                className={`${baseBtn} border border-amber-900/50 bg-amber-950/30 text-amber-500 hover:bg-amber-900/50`}>
+                {isPaused ? `▶ ${t.resumeRecording}` : `⏸ ${t.pauseRecording}`}
+              </button>
+              <button type="button" onClick={onStopRecording}
+                className={`${baseBtn} bg-rose-600 text-white hover:bg-rose-500 shadow-[0_0_14px_rgba(244,63,94,0.25)] hover:shadow-[0_0_22px_rgba(244,63,94,0.4)]`}>
+                ■ {t.finish}
+              </button>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={onStopRecording} disabled={!isRecording}
-              className={`${baseBtn} border border-rose-900/50 bg-rose-950/30 text-rose-400 hover:bg-rose-900/60`}>
-              {t.finish}
-            </button>
             <button type="button" onClick={onClearCrop} disabled={!hasCrop}
               className={`${baseBtn} border border-amber-900/30 bg-amber-950/20 text-amber-500/70 hover:bg-amber-900/50`}>
               {t.clearCrop}
             </button>
+            {!isRecording && latestRecordingPath ? (
+              <button type="button" onClick={() => void window.electronAPI?.openPath?.(latestRecordingPath)}
+                className={`${baseBtn} border border-emerald-900/30 bg-emerald-950/20 text-emerald-500/80 hover:bg-emerald-900/50`}>
+                📂 {t.openLatest}
+              </button>
+            ) : (
+              <div />
+            )}
           </div>
 
           <p className="text-center text-[0.6rem] text-slate-600 mt-1">

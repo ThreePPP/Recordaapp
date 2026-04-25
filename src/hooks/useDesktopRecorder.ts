@@ -42,7 +42,9 @@ export type DesktopRecorderController = {
   statusText: string;
   isSharing: boolean;
   isRecording: boolean;
+  isPaused: boolean;
   recordingDuration: number;
+  latestRecordingPath: string | null;
   hasCrop: boolean;
   displayedCrop: CropRect | null;
   previewWidth: number;
@@ -54,6 +56,8 @@ export type DesktopRecorderController = {
   stopSharing: () => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
   clearCrop: () => void;
   beginCropSelection: (e: CropSelectionEvent) => void;
   moveCropSelection: (e: CropSelectionEvent) => void;
@@ -70,6 +74,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   const [statusText, setStatus] = useState("Ready to capture your screen");
   const [isSharing, setIsSharing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [latestRecordingPath, setLatestRecordingPath] = useState<string | null>(null);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [cropRect, setCropRect] = useState<CropRect | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -93,6 +99,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   const isSharingStartingRef = useRef(false);
   const autoPreviewedRef = useRef("");
   const isRecordingRef = useRef(false); // sync ref for IPC callbacks
+  const isPausedRef = useRef(false);
+  const savePathRef = useRef(config.savePath);
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const selectedSource = useMemo(
@@ -160,6 +168,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
     setIsSharing(false);
     setIsRecording(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
     setRecordingDuration(0);
     stopTimers();
     setStatus("Capture stopped");
@@ -286,7 +296,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     } finally {
       isSharingStartingRef.current = false;
     }
-  }, [acquireDesktopStream, config.includeMicrophone, mixAudio, selectedSource?.name, stopSharing]);
+  }, [acquireDesktopStream, config.includeMicrophone, config.microphoneDeviceId, mixAudio, selectedSource?.name, stopSharing]);
 
   // ── Capture: build output stream (with optional crop canvas) ──────────────
 
@@ -335,13 +345,18 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
   // ── Recording: save file ───────────────────────────────────────────────────
 
-  const saveRecording = useCallback(async (chunks: Blob[], format: RecordFormat, durationMs: number) => {
+  const saveRecording = useCallback(async (
+    chunks: Blob[],
+    format: RecordFormat,
+    durationMs: number,
+    preferredSavePath?: string,
+  ) => {
     const raw = new Blob(chunks, {
       type: format.mimeType || (format.ext === "mp4" ? "video/mp4" : "video/webm"),
     });
 
     const filename = `record-${new Date().toISOString().replace(/[:.]/g, "-")}.${format.ext}`;
-    const folderPath = config.savePath;
+    const folderPath = preferredSavePath ?? savePathRef.current;
 
     const doSave = async (blob: Blob) => {
       // ── Electron: write to disk via IPC ──────────────────────────────────
@@ -350,6 +365,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
           const buffer = await blob.arrayBuffer();
           const saved = await window.electronAPI.saveRecording(buffer, filename, folderPath);
           setStatus(`${filename} saved`);
+          setLatestRecordingPath(saved);
           console.info("[recorder] saved →", saved);
           return;
         } catch (err) {
@@ -369,7 +385,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
     fixBlobDuration(raw, durationMs)
       .then(doSave)
       .catch(() => void doSave(raw)); // fallback: save without fix
-  }, [config.savePath]);
+  }, []);
 
 
   // ── Recording: start ───────────────────────────────────────────────────────
@@ -377,6 +393,8 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   const startRecording = useCallback(async () => {
     if (!configReady) { setStatus("Loading settings…"); return; }
     if (isRecording) return;
+
+    let activeSavePath = config.savePath;
 
     // ── Ensure a save folder is configured before starting ────────────────
     if (window.electronAPI?.selectSavePath && !config.savePath) {
@@ -386,11 +404,19 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
         setStatus("Recording cancelled — no save folder selected.");
         return;
       }
-      // Persist the chosen path to config
-      await window.electronAPI.saveAppConfig({ ...config, savePath: chosen });
-      // Note: config will update on next render via useAppConfig polling;
-      // we store it in a local ref so saveRecording can use it immediately.
-      (config as { savePath: string }).savePath = chosen;
+
+      try {
+        // Persist selected folder for future sessions.
+        if (window.electronAPI?.saveAppConfig) {
+          await window.electronAPI.saveAppConfig({ ...config, savePath: chosen });
+        }
+      } catch {
+        setStatus("Failed to save selected folder. Try again.");
+        return;
+      }
+
+      activeSavePath = chosen;
+      savePathRef.current = chosen;
     }
 
     if (!sourceStreamRef.current) {
@@ -431,7 +457,7 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
           return;
         }
 
-        saveRecording(chunksRef.current, format, durationMs);
+        saveRecording(chunksRef.current, format, durationMs, activeSavePath);
         chunksRef.current = [];
         setStatus(`Done! Saved as .${format.ext}`);
       };
@@ -440,7 +466,11 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       setIsRecording(true);
       setRecordingDuration(0);
 
-      timerRef.current = setInterval(() => setRecordingDuration((d) => d + 1), 1000);
+      timerRef.current = setInterval(() => {
+        if (!isPausedRef.current) {
+          setRecordingDuration((d) => d + 1);
+        }
+      }, 1000);
 
       if (config.maxRecordingMinutes > 0) {
         autoStopRef.current = setTimeout(() => {
@@ -468,6 +498,26 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   const stopRecording = useCallback(() => {
     if (recorderRef.current?.state !== "inactive") {
       recorderRef.current?.stop();
+    }
+  }, []);
+
+  // ── Recording: pause / resume ──────────────────────────────────────────────
+
+  const pauseRecording = useCallback(() => {
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.pause();
+      setIsPaused(true);
+      isPausedRef.current = true;
+      setStatus("Recording paused");
+    }
+  }, []);
+
+  const resumeRecording = useCallback(() => {
+    if (recorderRef.current?.state === "paused") {
+      recorderRef.current.resume();
+      setIsPaused(false);
+      isPausedRef.current = false;
+      setStatus("Recording resumed");
     }
   }, []);
 
@@ -513,6 +563,9 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
 
   // Sync isRecording to ref for IPC callbacks
   useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+
+  // Keep latest save path available for async save handlers.
+  useEffect(() => { savePathRef.current = config.savePath; }, [config.savePath]);
 
   // Register global IPC hotkeys
   useEffect(() => {
@@ -572,11 +625,11 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
   return {
     sources, selectedSourceId, setSelectedSourceId,
     isElectronBridgeReady, statusText,
-    isSharing, isRecording, recordingDuration,
+    isSharing, isRecording, isPaused, recordingDuration, latestRecordingPath,
     hasCrop, displayedCrop, previewWidth, previewHeight,
     overlayRef, previewVideoRef,
     refreshElectronSources, startSharing, stopSharing,
-    startRecording, stopRecording, clearCrop,
+    startRecording, stopRecording, pauseRecording, resumeRecording, clearCrop,
     beginCropSelection, moveCropSelection, endCropSelection,
   };
 }

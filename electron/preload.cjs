@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Writes recording blob to disk at the configured path
   saveRecording: (buffer, filename, folderPath) =>
     ipcRenderer.invoke("file:saveRecording", { buffer, filename, folderPath }),
+  // Opens the file location in OS
+  openPath: (path) => ipcRenderer.invoke("file:openPath", path),
 
   // ── App info ─────────────────────────────────────────────────────────────
   // Synchronous-style wrapper — resolves immediately since main returns a value

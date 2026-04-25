@@ -21,11 +21,14 @@ export function RecorderWorkspace() {
         statusText={recorder.statusText}
         isSharing={recorder.isSharing}
         isRecording={recorder.isRecording}
+        isPaused={recorder.isPaused}
+        latestRecordingPath={recorder.latestRecordingPath}
         recordingDuration={recorder.recordingDuration}
         hasCrop={recorder.hasCrop}
         // ── Audio props (now direct booleans instead of a label string)
         includeSystemAudio={appConfig.config.includeSystemAudio}
         includeMicrophone={appConfig.config.includeMicrophone}
+        microphoneDeviceId={appConfig.config.microphoneDeviceId}
         configLoading={appConfig.isLoading}
         configSaving={appConfig.saveState === "saving"}
         videoBitrateKbps={appConfig.config.videoBitrateKbps}
@@ -35,11 +38,14 @@ export function RecorderWorkspace() {
         onMaxRecordingMinutesChange={(min) => void appConfig.updateConfig({ maxRecordingMinutes: min })}
         onSystemAudioChange={(enabled) => void appConfig.updateConfig({ includeSystemAudio: enabled })}
         onMicrophoneChange={(enabled) => void appConfig.updateConfig({ includeMicrophone: enabled })}
+        onMicrophoneDeviceChange={(id) => void appConfig.updateConfig({ microphoneDeviceId: id })}
         onRefreshSources={recorder.refreshElectronSources}
         onStartSharing={recorder.startSharing}
         onStopSharing={recorder.stopSharing}
         onStartRecording={recorder.startRecording}
         onStopRecording={recorder.stopRecording}
+        onPauseRecording={recorder.pauseRecording}
+        onResumeRecording={recorder.resumeRecording}
         onClearCrop={recorder.clearCrop}
       />
 

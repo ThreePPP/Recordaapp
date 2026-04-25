@@ -43,6 +43,7 @@ export type RecorderConfig = {
   preferredCaptureMode: CaptureMode;
   includeSystemAudio: boolean;
   includeMicrophone: boolean;
+  microphoneDeviceId?: string;
   videoBitrateKbps: number;
   maxRecordingMinutes: number;
   /** Folder path where recordings are saved. Empty string = not configured. */
@@ -53,6 +54,7 @@ export const DEFAULT_RECORDER_CONFIG: RecorderConfig = {
   preferredCaptureMode: "electron",
   includeSystemAudio: true,
   includeMicrophone: false,
+  microphoneDeviceId: "",
   videoBitrateKbps: DEFAULT_VIDEO_BITRATE_KBPS,
   maxRecordingMinutes: DEFAULT_MAX_RECORDING_MINUTES,
   savePath: "",
