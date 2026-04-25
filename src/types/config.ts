@@ -87,6 +87,7 @@ export function normalizeRecorderConfig(value: Partial<RecorderConfig> | null | 
     preferredCaptureMode,
     includeSystemAudio: value?.includeSystemAudio !== false,
     includeMicrophone: value?.includeMicrophone === true,
+    microphoneDeviceId: typeof value?.microphoneDeviceId === "string" ? value.microphoneDeviceId : "",
     videoBitrateKbps: normalizeBitrateKbps(value?.videoBitrateKbps),
     maxRecordingMinutes: normalizeMaxRecordingMinutes(value?.maxRecordingMinutes),
     savePath: typeof value?.savePath === "string" ? value.savePath : "",

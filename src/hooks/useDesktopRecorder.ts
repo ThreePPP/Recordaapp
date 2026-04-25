@@ -251,10 +251,20 @@ export function useDesktopRecorder({ config, configReady }: Options): DesktopRec
       let micStream: MediaStream | null = null;
       if (includeMicrophone) {
         try {
-          micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          const micDeviceId = configRef.current.microphoneDeviceId;
+          const audioConstraint: MediaTrackConstraints = micDeviceId
+            ? { deviceId: { exact: micDeviceId } }
+            : {};
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false });
           micStreamRef.current = micStream;
         } catch {
-          setStatus("Microphone unavailable, continuing without it");
+          // If exact deviceId fails (device unplugged etc.), fall back to default
+          try {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            micStreamRef.current = micStream;
+          } catch {
+            setStatus("Microphone unavailable, continuing without it");
+          }
         }
       }
 
