@@ -11,6 +11,8 @@ const {
   session,
   systemPreferences,
   dialog,
+  protocol,
+  net,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
@@ -28,6 +30,7 @@ const DEFAULT_CONFIG = {
   preferredCaptureMode: "electron",
   includeSystemAudio: true,
   includeMicrophone: false,
+  microphoneDeviceId: "",
   videoBitrateKbps: 8000,
   maxRecordingMinutes: 0,
   savePath: "",
@@ -39,6 +42,20 @@ app.commandLine.appendSwitch("allow-http-screen-capture");
 // Disable GPU to prevent ICU file descriptor error on Windows.
 // Screen recording uses the renderer's MediaRecorder API — GPU accel is not needed.
 app.disableHardwareAcceleration();
+
+// ── Register custom app:// protocol BEFORE app is ready ───────────────────────
+// This scheme is used so that all static-export asset URLs are absolute
+// (e.g. app://localhost/_next/...) and work regardless of route depth.
+protocol.registerSchemesAsPrivileged([{
+  scheme: "app",
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    corsEnabled: true,
+    stream: true,
+  },
+}]);
 
 // ── Config helpers ─────────────────────────────────────────────────────────────
 
@@ -52,6 +69,7 @@ function normalizeConfig(c) {
     preferredCaptureMode: c?.preferredCaptureMode === "systemPicker" ? "systemPicker" : "electron",
     includeSystemAudio: c?.includeSystemAudio !== false,
     includeMicrophone: c?.includeMicrophone === true,
+    microphoneDeviceId: typeof c?.microphoneDeviceId === "string" ? c.microphoneDeviceId.trim() : "",
     videoBitrateKbps: clamp(c?.videoBitrateKbps, 1000, 50000, DEFAULT_CONFIG.videoBitrateKbps),
     maxRecordingMinutes: clamp(c?.maxRecordingMinutes, 0, 180, DEFAULT_CONFIG.maxRecordingMinutes),
     savePath: typeof c?.savePath === "string" ? c.savePath.trim() : "",
@@ -73,8 +91,9 @@ function isPathInside(parent, target) {
 // ── URL / security helpers ─────────────────────────────────────────────────────
 
 const isDevUrl = (url) => { try { const u = new URL(url); return (u.protocol === "http:" || u.protocol === "https:") && (u.hostname === "localhost" || u.hostname === "127.0.0.1"); } catch { return false; } };
-const isTrustedRenderer = (wc) => { const url = wc?.getURL?.() ?? ""; return url && (isDev ? isDevUrl(url) : url.startsWith("file://")); };
-const isAllowedNav = (url) => isDev ? isDevUrl(url) : url.startsWith("file://");
+const isAppUrl = (url) => { try { return new URL(url).protocol === "app:"; } catch { return false; } };
+const isTrustedRenderer = (wc) => { const url = wc?.getURL?.() ?? ""; return url && (isDev ? isDevUrl(url) : isAppUrl(url)); };
+const isAllowedNav = (url) => isDev ? isDevUrl(url) : isAppUrl(url);
 const isSafeExternal = (url) => { try { return ALLOWED_PROTOCOLS.has(new URL(url).protocol); } catch { return false; } };
 
 // ── Config persistence ─────────────────────────────────────────────────────────
@@ -144,7 +163,9 @@ async function requestMicrophonePermission() {
 
 function getStartUrl() {
   if (isDev) return process.env.ELECTRON_START_URL || "http://localhost:3000";
-  return pathToFileURL(path.join(__dirname, "..", "out", "index.html")).toString();
+  // Use the custom app:// scheme — assets are served relative to this origin,
+  // so sub-routes like /settings/ load their chunks correctly.
+  return "app://localhost/index.html";
 }
 
 // ── Auto Updater ───────────────────────────────────────────────────────────────
@@ -182,24 +203,15 @@ function createMainWindow() {
   });
 
   win.webContents.on("will-navigate", (event, url) => {
-    if (!isAllowedNav(url)) {
-      event.preventDefault();
-      if (isSafeExternal(url)) void shell.openExternal(url);
-      return;
-    }
-    if (isDev || !url.startsWith("file://")) return;
+    // In dev, allow localhost navigation freely.
+    if (isDev) return;
 
-    const outDir = path.join(__dirname, "..", "out");
-    try {
-      const parsed = new URL(url);
-      const clean = parsed.pathname.replace(/\/+$/, "").replace(/\/index\.html$/, "") || "/";
-      const target =
-        clean === "" || clean === "/" || clean.endsWith("/index.html")
-          ? path.join(outDir, "index.html")
-          : path.join(outDir, clean.replace(/^\//, ""), "index.html");
-      const targetUrl = pathToFileURL(target).toString();
-      if (targetUrl !== url) { event.preventDefault(); win.loadURL(targetUrl); }
-    } catch { /* ignore malformed URLs */ }
+    // In production, only app:// URLs are allowed for internal navigation.
+    if (isAppUrl(url)) return;
+
+    // Block everything else — if it looks like an external link, open in browser.
+    event.preventDefault();
+    if (isSafeExternal(url)) void shell.openExternal(url);
   });
 
   win.loadURL(getStartUrl());
@@ -273,6 +285,22 @@ ipcMain.handle("app:version", () => app.getVersion());
 // ── App lifecycle ──────────────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // ── Register app:// protocol to serve static Next.js export ─────────────────
+  // All requests to app://localhost/* are mapped to the out/ directory.
+  // This makes asset URLs absolute so sub-routes (e.g. /settings/) load
+  // their JS chunks correctly — impossible with assetPrefix: "./" (relative).
+  if (!isDev) {
+    const outDir = path.join(__dirname, "..", "out");
+    protocol.handle("app", (req) => {
+      // Strip the origin: app://localhost/some/path?query → some/path
+      let urlPath = req.url.slice("app://localhost/".length);
+      urlPath = decodeURIComponent(urlPath.split("?")[0].split("#")[0]);
+      if (!urlPath || urlPath === "") urlPath = "index.html";
+      const filePath = path.join(outDir, urlPath);
+      return net.fetch(pathToFileURL(filePath).toString());
+    });
+  }
+
   setupPermissions(session.defaultSession);
   await requestMicrophonePermission();
 

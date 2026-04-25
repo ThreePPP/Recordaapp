@@ -14,8 +14,6 @@ const nextConfig: NextConfig = {
   // into the .exe without needing a running Next.js server.
   ...(isElectronBuild && {
     output: "export",
-    // Electron loads files via file:// — relative asset paths are required.
-    assetPrefix: "./",
     // Trailing slash ensures index.html is found correctly.
     trailingSlash: true,
     // Image optimisation is not supported in static export mode.
